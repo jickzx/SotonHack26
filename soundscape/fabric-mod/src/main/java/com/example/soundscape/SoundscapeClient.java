@@ -1,9 +1,9 @@
-package com.example.biomemusic;
+package com.example.soundscape;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 
-public class BiomeMusicClient implements ClientModInitializer {
+public class SoundscapeClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
@@ -12,14 +12,15 @@ public class BiomeMusicClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
 
+            // Check biome every second (20 ticks)
             tickCounter[0]++;
             if (tickCounter[0] < 20) return;
             tickCounter[0] = 0;
 
             var biomeEntry = client.world.getBiome(client.player.getBlockPos());
-            biomeEntry.getKey().ifPresent(biomeKey -> {
-                BiomeMusicHandler.onBiomeChanged(client, biomeKey);
-            });
+            biomeEntry.getKey().ifPresent(biomeKey ->
+                BiomeMusicHandler.onBiomeChanged(client, biomeKey)
+            );
         });
     }
 }

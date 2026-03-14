@@ -1,4 +1,4 @@
-package com.example.biomemusic;
+package com.example.soundscape;
 
 import net.minecraft.client.sound.AbstractSoundInstance;
 import net.minecraft.client.sound.SoundInstance;
@@ -11,8 +11,8 @@ public class LoopingSoundInstance extends AbstractSoundInstance {
         super(sound, SoundCategory.MUSIC, SoundInstance.createRandom());
         this.volume = volume;
         this.pitch = pitch;
-        this.repeat = true;       // Loop the track continuously
-        this.repeatDelay = 0;     // No gap between loops
-        this.relative = true;     // Not positional — plays globally
+        this.repeat = true;      // Loop continuously
+        this.repeatDelay = 0;    // No gap between loops
+        this.relative = true;    // Non-positional — plays globally
     }
 }
