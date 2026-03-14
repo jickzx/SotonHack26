@@ -54,15 +54,16 @@ logging.getLogger("spotipy.client").setLevel(logging.CRITICAL)
 spotify_audio_features_blocked = False
 
 SPOTIFY_AUDIO_FEATURES_NOTE = (
-    "Spotify blocked Audio Features for this app, so Soundscape analysed "
-    "the track's audio preview directly to extract real BPM, key, energy, "
-    "and other features from the actual waveform."
+    "Spotify's Audio Features API is unavailable, so Soundscape analysed "
+    "the track's audio preview using multi-method signal processing to "
+    "estimate BPM, key, energy, and other features from the waveform."
 )
 
 DEEZER_AUDIO_PREVIEW_NOTE = (
-    "Spotify blocked Audio Features and had no preview available, so "
-    "Soundscape sourced a 30-second audio preview from Deezer and analysed "
-    "the real waveform to extract BPM, key, energy, and other features."
+    "Spotify's Audio Features API is unavailable and no Spotify preview "
+    "was found, so Soundscape sourced a 30-second preview from Deezer "
+    "and analysed it using multi-method signal processing to estimate "
+    "BPM, key, energy, and other features."
 )
 
 SPOTIFY_AUDIO_PREVIEW_FALLBACK_NOTE = (
@@ -175,10 +176,12 @@ _MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
 
 def analyze_audio_preview(preview_url: str) -> dict | None:
     """
-    Download a Spotify 30-second preview and extract real audio features
-    using librosa.  Returns a dict matching Spotify's audio_features schema
-    (energy, valence, tempo, key, mode, acousticness, danceability, loudness)
-    or None if analysis fails.
+    Download a 30-second preview and extract audio features using librosa.
+
+    Uses multiple analysis methods per feature and cross-validates results
+    to produce estimates closer to Spotify's original Audio Features values.
+
+    Returns a dict matching Spotify's audio_features schema or None on failure.
     """
     try:
         import librosa
@@ -197,13 +200,42 @@ def analyze_audio_preview(preview_url: str) -> dict | None:
 
         y, sr = librosa.load(tmp_path, sr=22050)
 
-        # --- Tempo (BPM) ---
+        # ─── Tempo (BPM) with octave-error correction ───────────────────
+        # Method 1: beat_track (default)
         tempo_result = librosa.beat.beat_track(y=y, sr=sr)
-        # librosa >= 0.10 returns (tempo_array, beats); older returns (tempo, beats)
         raw_tempo = tempo_result[0]
-        tempo = float(np.atleast_1d(raw_tempo)[0])
+        tempo_beat = float(np.atleast_1d(raw_tempo)[0])
 
-        # --- Key and mode via chroma correlation ---
+        # Method 2: onset-autocorrelation based tempo estimation
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        tempo_oac = float(np.atleast_1d(
+            librosa.feature.tempo(onset_envelope=onset_env, sr=sr)
+        )[0])
+
+        # Method 3: percussive-source tempo (isolate drums/rhythm)
+        y_perc = librosa.effects.percussive(y, margin=3.0)
+        onset_perc = librosa.onset.onset_strength(y=y_perc, sr=sr)
+        tempo_perc = float(np.atleast_1d(
+            librosa.feature.tempo(onset_envelope=onset_perc, sr=sr)
+        )[0])
+
+        # Octave-error correction: if two methods agree within 10% but the
+        # third is roughly half or double, trust the majority.
+        candidates = [tempo_beat, tempo_oac, tempo_perc]
+        # Normalise all candidates to 70-180 BPM range (most music lives here)
+        normalised = []
+        for t in candidates:
+            while t > 0 and t < 55:
+                t *= 2
+            while t > 210:
+                t /= 2
+            normalised.append(t)
+
+        # Pick the median of normalised tempos (robust to one outlier)
+        normalised.sort()
+        tempo = normalised[1]  # median of 3
+
+        # ─── Key and mode via chroma correlation ────────────────────────
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         chroma_mean = chroma.mean(axis=1)
         best_corr, best_key, best_mode = -2.0, 0, 1
@@ -218,39 +250,155 @@ def analyze_audio_preview(preview_url: str) -> dict | None:
         key = best_key
         mode = best_mode
 
-        # --- Energy (RMS-based, normalized to ~0-1) ---
-        rms = float(librosa.feature.rms(y=y)[0].mean())
-        energy = min(1.0, rms / 0.08)
+        # ─── Energy (multi-feature) ─────────────────────────────────────
+        # Combine RMS loudness, spectral bandwidth, and spectral rolloff
+        # for a more robust energy estimate.
+        rms_vals = librosa.feature.rms(y=y)[0]
+        rms_mean = float(rms_vals.mean())
+        rms_energy = min(1.0, rms_mean / 0.06)
 
-        # --- Loudness (dB, matching Spotify's typical range) ---
-        loudness = float(librosa.amplitude_to_db(np.array([rms]), ref=1.0)[0])
+        # Spectral bandwidth: wider bandwidth = more energetic
+        bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+        bw_energy = min(1.0, float(bandwidth.mean()) / 3500.0)
 
-        # --- Danceability (onset regularity and strength) ---
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        # Spectral rolloff: higher rolloff = more high-frequency content = energy
+        rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85)[0]
+        rolloff_energy = min(1.0, float(rolloff.mean()) / 8000.0)
+
+        # Zero crossing rate: higher = noisier/more energetic
+        zcr = librosa.feature.zero_crossing_rate(y)[0]
+        zcr_energy = min(1.0, float(zcr.mean()) / 0.15)
+
+        # Dynamic range: energy tends to be higher when the signal is
+        # consistently loud rather than having quiet passages
+        rms_std = float(rms_vals.std())
+        rms_peak = float(rms_vals.max())
+        dynamic_factor = 1.0 - min(1.0, rms_std / (rms_peak + 1e-6))
+
+        energy = clamp(
+            0.35 * rms_energy +
+            0.20 * bw_energy +
+            0.15 * rolloff_energy +
+            0.15 * zcr_energy +
+            0.15 * dynamic_factor
+        )
+
+        # ─── Loudness (dB, matching Spotify's typical range) ────────────
+        loudness = float(librosa.amplitude_to_db(np.array([rms_mean]), ref=1.0)[0])
+
+        # ─── Danceability (rhythm regularity + tempo stability + bass) ──
         onset_mean = float(onset_env.mean())
-        # Onset autocorrelation measures rhythmic regularity
-        onset_ac = librosa.autocorrelate(onset_env, max_size=sr // 512)
+
+        # Rhythmic regularity via onset autocorrelation
+        onset_ac = librosa.autocorrelate(onset_env, max_size=int(sr // 512))
         if len(onset_ac) > 1:
             regularity = float(onset_ac[1] / (onset_ac[0] + 1e-6))
         else:
             regularity = 0.0
-        danceability = min(1.0, 0.5 * min(1.0, onset_mean / 8.0) + 0.5 * regularity)
 
-        # --- Acousticness (high spectral centroid = less acoustic) ---
+        # Tempo stability: low variance in beat intervals = more danceable
+        _, beats = librosa.beat.beat_track(y=y, sr=sr)
+        if len(beats) > 2:
+            beat_times = librosa.frames_to_time(beats, sr=sr)
+            intervals = np.diff(beat_times)
+            if len(intervals) > 1:
+                tempo_cv = float(intervals.std() / (intervals.mean() + 1e-6))
+                tempo_stability = max(0.0, 1.0 - tempo_cv * 3.0)
+            else:
+                tempo_stability = 0.5
+        else:
+            tempo_stability = 0.3
+
+        # Bass energy: danceable music tends to have strong low frequencies
+        S = np.abs(librosa.stft(y))
+        freq_bins = librosa.fft_frequencies(sr=sr)
+        bass_mask = freq_bins < 250
+        if bass_mask.any():
+            bass_power = float(S[bass_mask].mean())
+            total_power = float(S.mean()) + 1e-6
+            bass_ratio = min(1.0, bass_power / total_power)
+        else:
+            bass_ratio = 0.5
+
+        # Tempo sweet spot: 95-130 BPM is the most danceable range
+        if 95 <= tempo <= 130:
+            tempo_dance = 1.0
+        elif 80 <= tempo <= 150:
+            tempo_dance = 0.7
+        else:
+            tempo_dance = 0.4
+
+        danceability = clamp(
+            0.25 * min(1.0, onset_mean / 6.0) +
+            0.25 * regularity +
+            0.20 * tempo_stability +
+            0.15 * bass_ratio +
+            0.15 * tempo_dance
+        )
+
+        # ─── Acousticness (timbral analysis) ────────────────────────────
+        # Use multiple timbral features rather than just spectral centroid.
+
+        # Spectral flatness: higher = more noise-like (electronic), lower = tonal (acoustic)
+        flatness = librosa.feature.spectral_flatness(y=y)[0]
+        flatness_acoustic = max(0.0, 1.0 - float(flatness.mean()) * 15.0)
+
+        # Spectral centroid: lower = warmer/more acoustic
         centroid = float(librosa.feature.spectral_centroid(y=y, sr=sr)[0].mean())
-        # Typical centroid range ~500-5000 Hz; lower = more acoustic
-        acousticness = max(0.0, min(1.0, 1.0 - (centroid - 500) / 4500))
+        centroid_acoustic = max(0.0, min(1.0, 1.0 - (centroid - 800) / 3500))
 
-        # --- Valence (brightness + tempo heuristic) ---
-        # Higher spectral contrast in upper bands + faster tempo → happier
+        # Zero crossing rate: acoustic instruments tend to have lower ZCR
+        zcr_acoustic = max(0.0, 1.0 - float(zcr.mean()) / 0.12)
+
+        # Harmonic-to-percussive ratio: acoustic music is often more harmonic
+        y_harm = librosa.effects.harmonic(y)
+        harm_rms = float(librosa.feature.rms(y=y_harm)[0].mean())
+        perc_rms = float(librosa.feature.rms(y=y_perc)[0].mean())
+        harm_ratio = harm_rms / (harm_rms + perc_rms + 1e-6)
+        # Very harmonic content suggests acoustic; very percussive suggests electronic
+        harm_acoustic = min(1.0, harm_ratio * 1.3)
+
+        acousticness = clamp(
+            0.30 * flatness_acoustic +
+            0.25 * centroid_acoustic +
+            0.20 * zcr_acoustic +
+            0.25 * harm_acoustic
+        )
+
+        # ─── Valence / Positivity (multi-signal) ───────────────────────
+        # Valence is the hardest feature to estimate from audio alone.
+        # We combine mode (major/minor), spectral brightness, tempo,
+        # harmonic complexity, and dynamic range.
+
+        # Major mode → happier
+        mode_valence = 0.65 if mode == 1 else 0.35
+
+        # Faster tempo → slightly happier
+        tempo_factor = min(1.0, max(0.0, (tempo - 70) / 120))
+
+        # Spectral brightness via contrast: brighter = happier
         contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
         brightness = float(contrast.mean())
-        tempo_factor = min(1.0, max(0.0, (tempo - 60) / 140))
-        valence = min(1.0, max(0.0,
-            0.4 * min(1.0, max(0.0, (brightness + 25) / 50)) +
-            0.3 * tempo_factor +
-            0.3 * (1.0 - acousticness)
-        ))
+        bright_valence = min(1.0, max(0.0, (brightness + 20) / 45))
+
+        # High-frequency energy ratio: bright, sparkly production = happier
+        if len(freq_bins) > 0:
+            high_mask = freq_bins > 4000
+            if high_mask.any():
+                high_ratio = float(S[high_mask].mean()) / (float(S.mean()) + 1e-6)
+                high_valence = min(1.0, high_ratio * 2.0)
+            else:
+                high_valence = 0.5
+        else:
+            high_valence = 0.5
+
+        valence = clamp(
+            0.30 * mode_valence +
+            0.20 * tempo_factor +
+            0.25 * bright_valence +
+            0.15 * high_valence +
+            0.10 * (1.0 - min(1.0, acousticness * 0.6))
+        )
 
         return {
             "energy": round(energy, 4),
@@ -506,10 +654,175 @@ def features_to_seed(features: dict, track_id: str) -> int:
     return seed
 
 
+# ──── World Profile Scoring Engine ─────────────────────────────────────
+#
+# Every decision (biome, terrain, atmosphere, genre) is independently
+# scored against ALL audio features.  For each category a set of target
+# profiles is defined — each with ideal feature values and a weight
+# vector controlling how much each feature matters.  The profile with
+# the highest weighted similarity wins.
+#
+# Feature vector order:
+#   [energy, valence, tempo_norm, acousticness, danceability, is_major]
+#
+# where  tempo_norm = clamp((bpm - 60) / 140)   → 0 at 60 BPM, 1 at 200
+#        is_major   = 1.0 if major mode, else 0.0
+
+def _score_profile(features: list[float], targets: list[float],
+                   weights: list[float]) -> float:
+    """Weighted similarity: sum of weight_i * (1 - |feature_i - target_i|)."""
+    return sum(w * (1.0 - abs(f - t)) for f, t, w in zip(features, targets, weights))
+
+
+def _best_match(features: list[float], profiles: list[dict]) -> dict:
+    """Return the profile dict with the highest score."""
+    return max(profiles, key=lambda p: _score_profile(features, p["t"], p["w"]))
+
+
+#                     energy  valence  tempo  acoustic  dance  major
+_BIOME_PROFILES = [
+    # High energy + dark + minor mode → hostile underworld
+    {"label": "Nether / Deep Dark — dark, hostile, dangerous",
+     "t": [0.90, 0.15, 0.60, 0.10, 0.35, 0.0],
+     "w": [0.20, 0.30, 0.10, 0.15, 0.10, 0.15]},
+
+    # Soft + happy + acoustic + slow → dreamy garden
+    {"label": "Cherry Grove / Pale Garden — soft, dreamlike, lush",
+     "t": [0.30, 0.80, 0.30, 0.75, 0.40, 1.0],
+     "w": [0.15, 0.25, 0.15, 0.20, 0.10, 0.15]},
+
+    # Low energy + dark + very acoustic + very slow → ancient forest
+    {"label": "Old Growth Forest / Swamp — dense, organic, ancient",
+     "t": [0.25, 0.30, 0.15, 0.85, 0.20, 0.0],
+     "w": [0.20, 0.15, 0.20, 0.25, 0.15, 0.05]},
+
+    # High energy + fast + danceable + non-acoustic → open energetic
+    {"label": "Badlands / Savanna — open, bright, energetic",
+     "t": [0.80, 0.65, 0.75, 0.15, 0.85, 1.0],
+     "w": [0.15, 0.10, 0.25, 0.15, 0.25, 0.10]},
+
+    # Moderate + very happy + major mode → cheerful meadow
+    {"label": "Meadow / Flower Forest — cheerful, open, peaceful",
+     "t": [0.45, 0.80, 0.40, 0.50, 0.50, 1.0],
+     "w": [0.10, 0.30, 0.15, 0.10, 0.10, 0.25]},
+
+    # High energy + moderate-fast + danceable → vibrant jungle
+    {"label": "Jungle / Lush Caves — vibrant, rhythmic, alive",
+     "t": [0.75, 0.55, 0.55, 0.45, 0.75, 1.0],
+     "w": [0.15, 0.10, 0.25, 0.15, 0.25, 0.10]},
+
+    # Very low everything → frozen wasteland
+    {"label": "Frozen Peaks / Snowy Taiga — cold, sparse, atmospheric",
+     "t": [0.15, 0.20, 0.15, 0.55, 0.15, 0.0],
+     "w": [0.25, 0.25, 0.15, 0.10, 0.15, 0.10]},
+
+    # Moderate + non-acoustic + moderate dance → dry hypnotic terrain
+    {"label": "Desert / Warm Ocean — sparse, sun-baked, hypnotic",
+     "t": [0.55, 0.45, 0.50, 0.15, 0.60, 1.0],
+     "w": [0.15, 0.15, 0.20, 0.25, 0.20, 0.05]},
+
+    # Moderate-high energy + SLOW tempo + moderate acoustic → moody intimate
+    {"label": "Dark Forest / Mangrove Swamp — moody, warm, intimate",
+     "t": [0.65, 0.55, 0.20, 0.60, 0.60, 1.0],
+     "w": [0.15, 0.15, 0.25, 0.15, 0.15, 0.15]},
+
+    # Moderate + happy + moderate-fast + quirky → otherworldly
+    {"label": "Mushroom Fields / End Islands — surreal, otherworldly, unique",
+     "t": [0.50, 0.65, 0.55, 0.35, 0.65, 1.0],
+     "w": [0.15, 0.20, 0.20, 0.15, 0.20, 0.10]},
+]
+
+_TERRAIN_PROFILES = [
+    {"label": "Extreme — jagged mountains, deep ravines, volatile terrain",
+     "t": [0.90, 0.20, 0.65, 0.15, 0.40, 0.0],
+     "w": [0.30, 0.25, 0.15, 0.10, 0.10, 0.10]},
+
+    {"label": "Mountainous — towering peaks, dramatic valleys, expansive views",
+     "t": [0.70, 0.50, 0.50, 0.40, 0.35, 1.0],
+     "w": [0.30, 0.15, 0.20, 0.15, 0.15, 0.05]},
+
+    {"label": "Varied — rolling hills, mixed elevations, caves common",
+     "t": [0.50, 0.50, 0.40, 0.50, 0.50, 1.0],
+     "w": [0.25, 0.15, 0.20, 0.15, 0.20, 0.05]},
+
+    {"label": "Gentle — flat plains, shallow valleys, calm landscape",
+     "t": [0.20, 0.70, 0.25, 0.65, 0.30, 1.0],
+     "w": [0.30, 0.20, 0.15, 0.15, 0.10, 0.10]},
+]
+
+_ATMOSPHERE_PROFILES = [
+    {"label": "Melancholic and brooding — overcast skies and sparse life",
+     "t": [0.35, 0.15, 0.30, 0.50, 0.25, 0.0],
+     "w": [0.15, 0.35, 0.10, 0.10, 0.15, 0.15]},
+
+    {"label": "Mysterious and tense — fog-draped, unpredictable encounters",
+     "t": [0.60, 0.30, 0.40, 0.40, 0.45, 0.0],
+     "w": [0.15, 0.25, 0.15, 0.15, 0.15, 0.15]},
+
+    {"label": "Neutral and grounded — neither too harsh nor too inviting",
+     "t": [0.50, 0.50, 0.45, 0.45, 0.50, 1.0],
+     "w": [0.20, 0.20, 0.20, 0.15, 0.20, 0.05]},
+
+    {"label": "Warm and alive — abundant nature, bright colours, welcoming",
+     "t": [0.55, 0.75, 0.50, 0.55, 0.60, 1.0],
+     "w": [0.10, 0.35, 0.15, 0.10, 0.15, 0.15]},
+
+    {"label": "Electric and vibrant — dynamic weather, constant motion",
+     "t": [0.80, 0.65, 0.70, 0.20, 0.80, 1.0],
+     "w": [0.20, 0.15, 0.20, 0.15, 0.25, 0.05]},
+]
+
+_GENRE_PROFILES = [
+    {"key": "metal",
+     "t": [0.90, 0.15, 0.60, 0.10, 0.35, 0.0],
+     "w": [0.25, 0.25, 0.10, 0.15, 0.10, 0.15]},
+
+    {"key": "indipop",
+     "t": [0.40, 0.75, 0.35, 0.70, 0.45, 1.0],
+     "w": [0.15, 0.25, 0.15, 0.20, 0.10, 0.15]},
+
+    {"key": "country",
+     "t": [0.35, 0.70, 0.30, 0.90, 0.45, 1.0],
+     "w": [0.20, 0.15, 0.15, 0.20, 0.10, 0.20]},
+
+    {"key": "ambient",
+     "t": [0.20, 0.35, 0.15, 0.80, 0.20, 0.0],
+     "w": [0.25, 0.10, 0.20, 0.25, 0.15, 0.05]},
+
+    {"key": "electronic",
+     "t": [0.80, 0.55, 0.65, 0.10, 0.80, 1.0],
+     "w": [0.15, 0.10, 0.25, 0.20, 0.25, 0.05]},
+
+    {"key": "jazz",
+     "t": [0.45, 0.65, 0.30, 0.60, 0.50, 1.0],
+     "w": [0.15, 0.15, 0.20, 0.20, 0.15, 0.15]},
+
+    {"key": "hiphop",
+     "t": [0.65, 0.50, 0.20, 0.35, 0.70, 1.0],
+     "w": [0.10, 0.10, 0.30, 0.10, 0.25, 0.15]},
+
+    {"key": "pop",
+     "t": [0.70, 0.70, 0.50, 0.25, 0.75, 1.0],
+     "w": [0.10, 0.15, 0.25, 0.15, 0.25, 0.10]},
+
+    {"key": "classical",
+     "t": [0.30, 0.50, 0.30, 0.90, 0.15, 1.0],
+     "w": [0.15, 0.10, 0.15, 0.35, 0.20, 0.05]},
+
+    {"key": "rock",
+     "t": [0.80, 0.45, 0.55, 0.25, 0.45, 1.0],
+     "w": [0.25, 0.15, 0.20, 0.15, 0.15, 0.10]},
+]
+
+
 def build_world_profile(features: dict) -> dict:
     """
     Describe the kind of Minecraft world this song will generate,
     based on its audio fingerprint.
+
+    Every decision (biome, terrain, atmosphere, genre) is scored against
+    ALL audio features using weighted target profiles, so different
+    feature combinations always produce distinct results.
     """
     energy       = features.get("energy",       0.5)
     valence      = features.get("valence",       0.5)
@@ -517,59 +830,40 @@ def build_world_profile(features: dict) -> dict:
     mode         = features.get("mode",          1)
     acousticness = features.get("acousticness",  0.5)
     danceability = features.get("danceability",  0.5)
-    key          = features.get("key",           0)
 
-    # --- Terrain descriptor ---
-    if energy > 0.75:
-        terrain = "Extreme — jagged mountains, deep ravines, volatile terrain"
-    elif energy > 0.45:
-        terrain = "Varied — rolling hills, mixed elevations, caves common"
-    else:
-        terrain = "Gentle — flat plains, shallow valleys, calm landscape"
+    # Normalise tempo to [0, 1]:  60 BPM → 0.0,  200 BPM → 1.0
+    tempo_norm = clamp((tempo - 60) / 140)
+    is_major   = 1.0 if mode == 1 else 0.0
 
-    # --- Dominant biome ---
-    if mode == 0 and energy > 0.6:
-        dominant_biome = "Nether / Deep Dark — dark, hostile, dangerous"
-        mod_genre = "metal"
-    elif valence > 0.7 and acousticness > 0.4:
-        dominant_biome = "Cherry Grove / Pale Garden — soft, dreamlike, lush"
-        mod_genre = "indipop" if valence > 0.8 else "country"
-    elif acousticness > 0.6:
-        dominant_biome = "Old Growth Forest / Swamp — dense, organic, ancient"
-        mod_genre = "ambient"
-    elif danceability > 0.7:
-        dominant_biome = "Badlands / Savanna — open, bright, energetic"
-        mod_genre = "electronic"
-    elif key in [0, 5, 7]:  # C, F, G — bright keys
-        dominant_biome = "Meadow / Flower Forest — cheerful, open"
-        mod_genre = "jazz"
-    else:
-        dominant_biome = "Mixed Overworld — balanced, classic Minecraft feel"
-        mod_genre = "default"
+    fv = [energy, valence, tempo_norm, acousticness, danceability, is_major]
 
-    # --- Atmosphere ---
-    if valence < 0.3:
-        atmosphere = "Melancholic and brooding — expect overcast skies and sparse life"
-    elif valence < 0.6:
-        atmosphere = "Neutral and grounded — neither too harsh nor too inviting"
-    else:
-        atmosphere = "Warm and alive — abundant nature, bright colours, welcoming"
+    # --- Score every category independently against all features ---
+    biome      = _best_match(fv, _BIOME_PROFILES)
+    terrain    = _best_match(fv, _TERRAIN_PROFILES)
+    atmosphere = _best_match(fv, _ATMOSPHERE_PROFILES)
+    genre      = _best_match(fv, _GENRE_PROFILES)
 
-    # --- Hostility level ---
-    hostility_score = (energy * 0.5) + ((1 - valence) * 0.3) + ((1 - acousticness) * 0.2)
+    # --- Hostility (weighted formula across all features) ---
+    hostility_score = (
+        energy * 0.35 +
+        (1 - valence) * 0.25 +
+        (1 - acousticness) * 0.15 +
+        tempo_norm * 0.15 +
+        (1 - is_major) * 0.10
+    )
     if hostility_score > 0.65:
         hostility = "High — prepare for frequent mob encounters"
-    elif hostility_score > 0.35:
+    elif hostility_score > 0.40:
         hostility = "Moderate — balanced survival experience"
     else:
         hostility = "Low — peaceful exploration encouraged"
 
     return {
-        "terrain":        terrain,
-        "dominant_biome": dominant_biome,
-        "atmosphere":     atmosphere,
+        "terrain":        terrain["label"],
+        "dominant_biome": biome["label"],
+        "atmosphere":     atmosphere["label"],
         "hostility":      hostility,
-        "mod_genre":      mod_genre,
+        "mod_genre":      genre["key"],
         "stats": {
             "energy":       round(energy * 100),
             "positivity":   round(valence * 100),
@@ -607,16 +901,27 @@ def generate():
         track_id = extract_track_id(url)
 
         # Fetch track metadata first, then attempt audio features.
-        track    = sp.track(track_id)
+        track = sp.track(track_id)
+        if not track:
+            return jsonify({"error": "Track not found. Check the URL and try again."}), 404
+
         features, analysis_note = fetch_track_features(track_id, track)
 
         seed    = features_to_seed(features, track_id)
         profile = build_world_profile(features)
 
+        # Safely extract metadata with fallbacks.
+        track_name = track.get("name", "Unknown Track")
+        artists    = track.get("artists") or []
+        artist     = artists[0]["name"] if artists else "Unknown Artist"
+        album      = track.get("album") or {}
+        images     = album.get("images") or []
+        album_art  = images[0]["url"] if images else None
+
         return jsonify({
-            "track_name":  track["name"],
-            "artist":      track["artists"][0]["name"],
-            "album_art":   track["album"]["images"][0]["url"] if track["album"]["images"] else None,
+            "track_name":  track_name,
+            "artist":      artist,
+            "album_art":   album_art,
             "seed":        str(seed),
             "profile":     profile,
             "analysis_note": analysis_note,

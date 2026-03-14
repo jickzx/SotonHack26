@@ -232,32 +232,54 @@
     /* Stats bar */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
       margin-bottom: 20px;
+    }
+
+    @media (max-width: 520px) {
+      .stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
     }
 
     .stat {
       background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
+      border-radius: 14px;
+      padding: 16px 10px;
       text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 80px;
     }
 
     .stat-val {
       font-family: 'Space Mono', monospace;
-      font-size: 1.2rem;
+      font-size: 1.35rem;
       font-weight: 700;
       color: var(--accent2);
+      line-height: 1.2;
+    }
+
+    .stat-unit {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 400;
+      color: var(--accent2);
+      opacity: 0.7;
+      margin-top: 1px;
     }
 
     .stat-label {
-      font-size: 0.7rem;
+      font-size: 0.65rem;
       color: var(--muted);
-      margin-top: 4px;
+      margin-top: 8px;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.12em;
+      font-weight: 500;
     }
 
     /* World profile */
@@ -426,7 +448,11 @@
       country:    "country / folk",
       ambient:    "ambient / atmospheric",
       electronic: "electronic / synth",
-      jazz:       "jazz / upbeat",
+      jazz:       "jazz / swing",
+      hiphop:     "hip-hop / R&B",
+      pop:        "pop / dance-pop",
+      classical:  "classical / orchestral",
+      rock:       "rock / alternative",
       default:    "classic Minecraft-style music"
     };
 
@@ -459,32 +485,35 @@
 
     function renderResult(data) {
       document.getElementById("albumArt").src    = data.album_art || "";
-      document.getElementById("trackName").textContent  = data.track_name;
-      document.getElementById("artistName").textContent = data.artist;
+      document.getElementById("trackName").textContent  = data.track_name  || "Unknown Track";
+      document.getElementById("artistName").textContent = data.artist      || "Unknown Artist";
       document.getElementById("seedNum").textContent    = data.seed;
       setAnalysisNote(data.analysis_note);
 
       const p = data.profile;
+      if (!p) { console.error("Missing profile in response"); return; }
+
       document.getElementById("terrain").textContent     = p.terrain;
       document.getElementById("biome").textContent       = p.dominant_biome;
       document.getElementById("atmosphere").textContent  = p.atmosphere;
       document.getElementById("hostility").textContent   = p.hostility;
 
       const genreLabel = GENRE_LABELS[p.mod_genre] || p.mod_genre;
-      document.getElementById("genreBadge").textContent = "🎵 In-world genre: " + genreLabel;
+      document.getElementById("genreBadge").textContent = "In-world genre: " + genreLabel;
       document.getElementById("genreNote").textContent  = genreLabel + " music";
 
       // Stats
-      const stats = p.stats;
+      const stats = p.stats || {};
       const statsHtml = [
-        { label: "Energy",       val: stats.energy + "%" },
-        { label: "Positivity",   val: stats.positivity + "%" },
-        { label: "Tempo",        val: stats.tempo + " BPM" },
-        { label: "Acoustic",     val: stats.acousticness + "%" },
-        { label: "Danceability", val: stats.danceability + "%" }
+        { label: "Energy",       val: stats.energy,       unit: "%" },
+        { label: "Positivity",   val: stats.positivity,   unit: "%" },
+        { label: "Tempo",        val: stats.tempo,         unit: "BPM" },
+        { label: "Acoustic",     val: stats.acousticness,  unit: "%" },
+        { label: "Danceability", val: stats.danceability,  unit: "%" }
       ].map(s => `
         <div class="stat">
           <div class="stat-val">${s.val}</div>
+          <div class="stat-unit">${s.unit}</div>
           <div class="stat-label">${s.label}</div>
         </div>
       `).join("");
