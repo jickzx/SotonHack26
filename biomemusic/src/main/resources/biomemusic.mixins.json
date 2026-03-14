@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "com.example.biomemusic.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["MusicTrackerMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "biomemusic",
+  "version": "1.0.0",
+  "name": "Biome Music",
+  "description": "Plays genre-specific music based on your current biome.",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.example.biomemusic.BiomeMusicClient"]
+  },
+  "mixins": ["biomemusic.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.4"
+  }
+}
