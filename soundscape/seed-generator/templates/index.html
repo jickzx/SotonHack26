@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Soundscape — Music to Minecraft</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+    :root {
+      --bg:       #0a0a0f;
+      --surface:  #12121a;
+      --border:   #1e1e2e;
+      --accent:   #7c6aff;
+      --accent2:  #ff6a9b;
+      --text:     #e8e8f0;
+      --muted:    #6b6b80;
+      --success:  #6affb4;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+    }
+
+    /* Ambient glow background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 800px; height: 500px;
+      background: radial-gradient(ellipse, rgba(124,106,255,0.12) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 700;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 50%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.1;
+      margin-bottom: 16px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 1rem;
+      font-weight: 400;
+      max-width: 480px;
+      line-height: 1.6;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      width: 100%;
+      max-width: 600px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+
+    button:hover  { opacity: 0.9; }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .hint a { color: var(--accent); text-decoration: none; }
+
+    /* Loading */
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 40px 0;
+      color: var(--muted);
+    }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results */
+    #result { display: none; margin-top: 28px; }
+
+    .track-header {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .album-art {
+      width: 64px; height: 64px;
+      border-radius: 10px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .track-info .track-name {
+      font-weight: 600;
+      font-size: 1.05rem;
+    }
+
+    .track-info .artist {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 2px;
+    }
+
+    .seed-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .seed-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    .seed-number {
+      font-family: 'Space Mono', monospace;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--success);
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Stats bar */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .stat {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-val {
+      font-family: 'Space Mono', monospace;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--accent2);
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* World profile */
+    .profile-section {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+
+    .profile-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .profile-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 10px;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .profile-row:last-child { margin-bottom: 0; }
+
+    .profile-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+
+    .genre-badge {
+      display: inline-block;
+      background: rgba(124,106,255,0.15);
+      border: 1px solid rgba(124,106,255,0.3);
+      border-radius: 8px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: 12px;
+    }
+
+    .mod-note {
+      background: rgba(106,255,180,0.07);
+      border: 1px solid rgba(106,255,180,0.2);
+      border-radius: 12px;
+      padding: 14px 18px;
+      font-size: 0.85rem;
+      color: var(--success);
+      line-height: 1.5;
+    }
+
+    .error-box {
+      background: rgba(255,80,80,0.08);
+      border: 1px solid rgba(255,80,80,0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      color: #ff8080;
+      font-size: 0.9rem;
+      margin-top: 20px;
+      display: none;
+    }
+
+    .analysis-box {
+      background: rgba(255, 214, 102, 0.08);
+      border: 1px solid rgba(255, 214, 102, 0.25);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: #ffd666;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-top: 20px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">🎵 Soundscape</div>
+    <h1>Music becomes<br>a Minecraft world.</h1>
+    <p class="subtitle">
+      Paste any Spotify track link. We'll analyse its DNA —
+      tempo, mood, energy — and forge a unique world seed just for that song.
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="input-group">
+      <input type="text" id="spotifyUrl"
+        placeholder="https://open.spotify.com/track/..." />
+      <button id="generateBtn" onclick="generate()">Generate</button>
+    </div>
+    <p class="hint">
+      Right-click any song in Spotify → Share →
+      <a href="#" onclick="return false;">Copy Song Link</a>
+    </p>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Analysing your song...</p>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+    <div class="analysis-box" id="analysisBox"></div>
+
+    <div id="result">
+      <div class="track-header">
+        <img class="album-art" id="albumArt" src="" alt="" />
+        <div class="track-info">
+          <div class="track-name" id="trackName"></div>
+          <div class="artist" id="artistName"></div>
+        </div>
+      </div>
+
+      <div class="seed-block">
+        <div>
+          <div class="seed-label">Your Minecraft Seed</div>
+          <div class="seed-number" id="seedNum"></div>
+        </div>
+        <button class="copy-btn" onclick="copySeed()">Copy</button>
+      </div>
+
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <div class="profile-section">
+        <div class="profile-title">World Profile</div>
+        <div class="profile-row">
+          <span class="profile-icon">⛰️</span>
+          <span id="terrain"></span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-icon">🌿</span>
+          <span id="biome"></span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-icon">🌫️</span>
+          <span id="atmosphere"></span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-icon">⚔️</span>
+          <span id="hostility"></span>
+        </div>
+        <div>
+          <div class="genre-badge" id="genreBadge"></div>
+        </div>
+      </div>
+
+      <div class="mod-note">
+        🎮 <strong>Using the Biome Music Mod?</strong>
+        Once you're in this world, the mod will play
+        <strong id="genreNote"></strong> based on your current biome —
+        completing the full Soundscape experience.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GENRE_LABELS = {
+      metal:      "heavy rock / metal",
+      indipop:    "indie pop / soft acoustic",
+      country:    "country / folk",
+      ambient:    "ambient / atmospheric",
+      electronic: "electronic / synth",
+      jazz:       "jazz / upbeat",
+      default:    "classic Minecraft-style music"
+    };
+
+    async function generate() {
+      const url = document.getElementById("spotifyUrl").value.trim();
+      if (!url) return;
+
+      setLoading(true);
+      hideError();
+      setAnalysisNote(null);
+      document.getElementById("result").style.display = "none";
+
+      try {
+        const res  = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+
+        if (data.error) { showError(data.error); return; }
+
+        renderResult(data);
+      } catch (e) {
+        showError("Something went wrong. Is the server running?");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderResult(data) {
+      document.getElementById("albumArt").src    = data.album_art || "";
+      document.getElementById("trackName").textContent  = data.track_name;
+      document.getElementById("artistName").textContent = data.artist;
+      document.getElementById("seedNum").textContent    = data.seed;
+      setAnalysisNote(data.analysis_note);
+
+      const p = data.profile;
+      document.getElementById("terrain").textContent     = p.terrain;
+      document.getElementById("biome").textContent       = p.dominant_biome;
+      document.getElementById("atmosphere").textContent  = p.atmosphere;
+      document.getElementById("hostility").textContent   = p.hostility;
+
+      const genreLabel = GENRE_LABELS[p.mod_genre] || p.mod_genre;
+      document.getElementById("genreBadge").textContent = "🎵 In-world genre: " + genreLabel;
+      document.getElementById("genreNote").textContent  = genreLabel + " music";
+
+      // Stats
+      const stats = p.stats;
+      const statsHtml = [
+        { label: "Energy",       val: stats.energy + "%" },
+        { label: "Positivity",   val: stats.positivity + "%" },
+        { label: "Tempo",        val: stats.tempo + " BPM" },
+        { label: "Acoustic",     val: stats.acousticness + "%" },
+        { label: "Danceability", val: stats.danceability + "%" }
+      ].map(s => `
+        <div class="stat">
+          <div class="stat-val">${s.val}</div>
+          <div class="stat-label">${s.label}</div>
+        </div>
+      `).join("");
+      document.getElementById("statsGrid").innerHTML = statsHtml;
+
+      document.getElementById("result").style.display = "block";
+    }
+
+    function copySeed() {
+      const seed = document.getElementById("seedNum").textContent;
+      navigator.clipboard.writeText(seed);
+      const btn = document.querySelector(".copy-btn");
+      btn.textContent = "Copied!";
+      setTimeout(() => btn.textContent = "Copy", 2000);
+    }
+
+    function setLoading(on) {
+      document.getElementById("loading").style.display = on ? "block" : "none";
+      document.getElementById("generateBtn").disabled = on;
+    }
+
+    function showError(msg) {
+      const box = document.getElementById("errorBox");
+      box.textContent = "⚠️ " + msg;
+      box.style.display = "block";
+    }
+
+    function hideError() {
+      document.getElementById("errorBox").style.display = "none";
+    }
+
+    function setAnalysisNote(msg) {
+      const box = document.getElementById("analysisBox");
+      if (!msg) {
+        box.style.display = "none";
+        box.textContent = "";
+        return;
+      }
+      box.textContent = "Note: " + msg;
+      box.style.display = "block";
+    }
+
+    document.getElementById("spotifyUrl").addEventListener("keydown", e => {
+      if (e.key === "Enter") generate();
+    });
+  </script>
+
+</body>
+</html>

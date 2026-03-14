@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "com.example.soundscape.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["MusicTrackerMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
