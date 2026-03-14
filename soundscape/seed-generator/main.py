@@ -12,9 +12,12 @@ Setup:
 """
 
 import hashlib
+import logging
 import os
 import re
 import tempfile
+import unicodedata
+from difflib import SequenceMatcher
 from flask import Flask, render_template, request, jsonify
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -22,7 +25,8 @@ from dotenv import load_dotenv
 import requests as http_requests
 import numpy as np
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
 
@@ -30,6 +34,7 @@ app = Flask(__name__)
 # Create a free app at https://developer.spotify.com/dashboard
 SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+SPOTIFY_AUDIO_FEATURES_MODE = os.getenv("SPOTIFY_AUDIO_FEATURES_MODE", "off").strip().lower()
 
 if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
     raise RuntimeError(
@@ -40,6 +45,13 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_id=SPOTIFY_CLIENT_ID,
     client_secret=SPOTIFY_CLIENT_SECRET
 ))
+
+if SPOTIFY_AUDIO_FEATURES_MODE not in {"off", "auto", "force"}:
+    SPOTIFY_AUDIO_FEATURES_MODE = "off"
+
+logging.getLogger("spotipy.client").setLevel(logging.CRITICAL)
+
+spotify_audio_features_blocked = False
 
 SPOTIFY_AUDIO_FEATURES_NOTE = (
     "Spotify blocked Audio Features for this app, so Soundscape analysed "
@@ -80,6 +92,77 @@ def stable_fraction(*parts: object) -> float:
     payload = "||".join("" if part is None else str(part) for part in parts)
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") / float((1 << 64) - 1)
+
+
+def normalized_text(value: str | None) -> str:
+    """Normalise user-facing music metadata for cross-service matching."""
+    if not value:
+        return ""
+
+    value = unicodedata.normalize("NFKD", value)
+    value = value.encode("ascii", "ignore").decode("ascii")
+    value = value.lower().replace("&", " and ")
+    value = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", value)
+    value = re.sub(r"\b(feat|featuring|ft)\.?\b.*", " ", value)
+    value = re.sub(
+        r"\s*-\s*(live|remaster(?:ed)?(?: \d+)?|radio edit|edit|mix|version|mono|stereo)\b.*",
+        " ",
+        value,
+    )
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def text_similarity(left: str | None, right: str | None) -> float:
+    """Return a loose similarity score for two metadata strings."""
+    left_norm = normalized_text(left)
+    right_norm = normalized_text(right)
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm == right_norm:
+        return 1.0
+    return SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def score_deezer_result(result: dict, track: dict) -> float:
+    """Rank Deezer candidates so we use the preview for the right recording."""
+    candidate_title = " ".join(
+        part for part in [result.get("title"), result.get("title_version")] if part
+    )
+    candidate_artists = [(result.get("artist") or {}).get("name", "")]
+    for contributor in result.get("contributors") or []:
+        name = contributor.get("name")
+        if name:
+            candidate_artists.append(name)
+
+    spotify_artists = [artist.get("name", "") for artist in track.get("artists") or []]
+    title_score = text_similarity(track.get("name", ""), candidate_title)
+    artist_score = max(
+        (
+            text_similarity(spotify_artist, candidate_artist)
+            for spotify_artist in spotify_artists
+            for candidate_artist in candidate_artists
+        ),
+        default=0.0,
+    )
+
+    duration_score = 0.0
+    spotify_duration_ms = track.get("duration_ms")
+    deezer_duration = result.get("duration")
+    if spotify_duration_ms and deezer_duration:
+        duration_delta = abs((spotify_duration_ms / 1000) - float(deezer_duration))
+        duration_score = max(0.0, 1.0 - (duration_delta / 35.0))
+
+    spotify_isrc = ((track.get("external_ids") or {}).get("isrc") or "").upper()
+    deezer_isrc = (result.get("isrc") or "").upper()
+    isrc_score = 1.0 if spotify_isrc and spotify_isrc == deezer_isrc else 0.0
+
+    return (
+        0.55 * title_score +
+        0.30 * artist_score +
+        0.10 * duration_score +
+        0.05 * isrc_score
+    )
 
 
 # Krumhansl-Kessler key profiles for major and minor keys.
@@ -190,21 +273,41 @@ def analyze_audio_preview(preview_url: str) -> dict | None:
                 pass
 
 
-def fetch_deezer_preview(track_name: str, artist_name: str) -> str | None:
+def fetch_deezer_preview(track: dict) -> str | None:
     """
     Search Deezer's public API (no auth required) for the track and return
     its 30-second preview URL, or None if not found.
     """
+    track_name = track.get("name", "")
+    artist_name = (track.get("artists") or [{}])[0].get("name", "")
+    if not track_name or not artist_name:
+        return None
+
     try:
-        params = {"q": f'track:"{track_name}" artist:"{artist_name}"', "limit": 5}
-        resp = http_requests.get("https://api.deezer.com/search", params=params, timeout=10)
-        if resp.status_code != 200:
-            return None
-        results = resp.json().get("data") or []
-        for result in results:
-            preview = result.get("preview")
-            if preview:
-                return preview
+        search_queries = [
+            {"q": f'track:"{track_name}" artist:"{artist_name}"', "limit": 10},
+            {"q": f"{track_name} {artist_name}", "limit": 10},
+        ]
+        best_preview = None
+        best_score = 0.0
+
+        for params in search_queries:
+            resp = http_requests.get("https://api.deezer.com/search", params=params, timeout=10)
+            if resp.status_code != 200:
+                continue
+
+            for result in resp.json().get("data") or []:
+                preview = result.get("preview")
+                if not preview:
+                    continue
+
+                score = score_deezer_result(result, track)
+                if score > best_score:
+                    best_score = score
+                    best_preview = preview
+
+        if best_score >= 0.62:
+            return best_preview
         return None
     except Exception:
         return None
@@ -308,23 +411,36 @@ def should_fallback_from_exception(exc: Exception) -> bool:
     )
 
 
+def should_try_spotify_audio_features() -> bool:
+    """Decide if the app should attempt Spotify's restricted endpoint."""
+    if SPOTIFY_AUDIO_FEATURES_MODE == "off":
+        return False
+    if SPOTIFY_AUDIO_FEATURES_MODE == "force":
+        return True
+    return not spotify_audio_features_blocked
+
+
 def fetch_track_features(track_id: str, track: dict) -> tuple[dict, str | None]:
     """
     Get audio features using the best available source:
-      1. Spotify Audio Features API (most accurate)
+      1. Spotify Audio Features API when explicitly enabled
       2. Librosa analysis of the Spotify 30-second preview (real audio analysis)
       3. Librosa analysis of a Deezer 30-second preview (real audio analysis)
       4. Metadata-based fallback (deterministic but estimated)
     """
-    # --- Try Spotify Audio Features first ---
-    try:
-        features_list = sp.audio_features([track_id]) or []
-        features = features_list[0] if features_list else None
-        if features:
-            return features, None
-    except Exception as exc:
-        if not should_fallback_from_exception(exc):
-            raise
+    global spotify_audio_features_blocked
+
+    # --- Try Spotify Audio Features first when this app is allowed to use them ---
+    if should_try_spotify_audio_features():
+        try:
+            features_list = sp.audio_features([track_id]) or []
+            features = features_list[0] if features_list else None
+            if features:
+                return features, None
+        except Exception as exc:
+            if not should_fallback_from_exception(exc):
+                raise
+            spotify_audio_features_blocked = True
 
     # --- Audio features unavailable; try analysing the Spotify preview clip ---
     preview_url = track.get("preview_url")
@@ -334,14 +450,11 @@ def fetch_track_features(track_id: str, track: dict) -> tuple[dict, str | None]:
             return preview_features, SPOTIFY_AUDIO_FEATURES_NOTE
 
     # --- No Spotify preview; try Deezer's public API for a preview ---
-    track_name = track.get("name", "")
-    artist_name = (track.get("artists") or [{}])[0].get("name", "")
-    if track_name and artist_name:
-        deezer_preview_url = fetch_deezer_preview(track_name, artist_name)
-        if deezer_preview_url:
-            deezer_features = analyze_audio_preview(deezer_preview_url)
-            if deezer_features is not None:
-                return deezer_features, DEEZER_AUDIO_PREVIEW_NOTE
+    deezer_preview_url = fetch_deezer_preview(track)
+    if deezer_preview_url:
+        deezer_features = analyze_audio_preview(deezer_preview_url)
+        if deezer_features is not None:
+            return deezer_features, DEEZER_AUDIO_PREVIEW_NOTE
 
     # --- No preview available anywhere; fall back to metadata ---
     return metadata_to_features(track, track_id), SPOTIFY_AUDIO_PREVIEW_FALLBACK_NOTE
