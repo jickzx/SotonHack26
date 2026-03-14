@@ -1,2 +1,3 @@
+soundscape/seed-generator/.env
 .env
-.venv
+../.venv
