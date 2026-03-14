@@ -33,8 +33,11 @@ Step 2: Set up credentials
   c. Paste your Client ID and Client Secret into .env
 
 Step 3: Install dependencies
-  Open a terminal in seed-generator/ and run:
+  Open a terminal in `seed-generator/` and create a virtual environment, then install dependencies:
+    python3 -m venv .venv
+    source .venv/bin/activate
     pip install -r requirements.txt
+  (On macOS you can also use the Homebrew Python executable: `/opt/homebrew/bin/python3`.)
 
 Step 4: Run the web app
     python main.py

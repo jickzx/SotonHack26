@@ -324,6 +324,18 @@
       margin-top: 20px;
       display: none;
     }
+
+    .analysis-box {
+      background: rgba(255, 214, 102, 0.08);
+      border: 1px solid rgba(255, 214, 102, 0.25);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: #ffd666;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-top: 20px;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -354,6 +366,7 @@
     </div>
 
     <div class="error-box" id="errorBox"></div>
+    <div class="analysis-box" id="analysisBox"></div>
 
     <div id="result">
       <div class="track-header">
@@ -423,6 +436,7 @@
 
       setLoading(true);
       hideError();
+      setAnalysisNote(null);
       document.getElementById("result").style.display = "none";
 
       try {
@@ -448,6 +462,7 @@
       document.getElementById("trackName").textContent  = data.track_name;
       document.getElementById("artistName").textContent = data.artist;
       document.getElementById("seedNum").textContent    = data.seed;
+      setAnalysisNote(data.analysis_note);
 
       const p = data.profile;
       document.getElementById("terrain").textContent     = p.terrain;
@@ -499,6 +514,17 @@
 
     function hideError() {
       document.getElementById("errorBox").style.display = "none";
+    }
+
+    function setAnalysisNote(msg) {
+      const box = document.getElementById("analysisBox");
+      if (!msg) {
+        box.style.display = "none";
+        box.textContent = "";
+        return;
+      }
+      box.textContent = "Note: " + msg;
+      box.style.display = "block";
     }
 
     document.getElementById("spotifyUrl").addEventListener("keydown", e => {
