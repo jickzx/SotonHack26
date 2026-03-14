@@ -35,8 +35,10 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
 
 SPOTIFY_AUDIO_FEATURES_NOTE = (
     "Spotify blocked Audio Features for this app, so Soundscape used a "
-    "metadata-based fallback. The seed is still deterministic, but the stats "
-    "are estimated from track metadata instead of Spotify's audio analysis."
+    "metadata-based fallback. The seed is still fully deterministic and unique "
+    "to this track, but energy, valence, and acousticness are derived from "
+    "popularity and duration rather than Spotify's audio analysis. Key and mode "
+    "cannot be inferred from metadata and are fingerprinted from the track ID."
 )
 
 
@@ -61,20 +63,6 @@ def stable_fraction(*parts: object) -> float:
     return int.from_bytes(digest[:8], "big") / float((1 << 64) - 1)
 
 
-def stable_track_hash(track_id: str) -> int:
-    """Produce a repeatable short integer from the track ID."""
-    digest = hashlib.sha256(track_id.encode("utf-8")).hexdigest()
-    return int(digest[:12], 16) % 1_000_000
-
-
-def parse_release_year(track: dict) -> int:
-    """Extract a best-effort release year from a track payload."""
-    release_date = ((track.get("album") or {}).get("release_date") or "").strip()
-    if len(release_date) >= 4 and release_date[:4].isdigit():
-        return int(release_date[:4])
-    return 2000
-
-
 def metadata_to_features(track: dict, track_id: str) -> dict:
     """
     Build a deterministic fallback feature set from track metadata.
@@ -87,15 +75,12 @@ def metadata_to_features(track: dict, track_id: str) -> dict:
     primary_artist = artists[0] if artists else {}
 
     duration_ms = int(track.get("duration_ms") or 180_000)
-    album_total_tracks = max(int(album.get("total_tracks") or 1), 1)
     track_number = max(int(track.get("track_number") or 1), 1)
     disc_number = max(int(track.get("disc_number") or 1), 1)
     explicit = 1.0 if track.get("explicit") else 0.0
     popularity = track.get("popularity")
     popularity_norm = clamp(((50 if popularity is None else popularity) / 100))
     duration_norm = clamp((duration_ms - 90_000) / 330_000)
-    track_slot_norm = clamp((track_number - 1) / max(album_total_tracks - 1, 1))
-    year_norm = clamp((parse_release_year(track) - 1960) / 80)
 
     signature = (
         track_id,
@@ -109,39 +94,47 @@ def metadata_to_features(track: dict, track_id: str) -> dict:
         explicit,
     )
 
+    # Energy: popularity is the best available proxy (popular tracks skew energetic).
+    # Explicit flag adds a small boost (explicit tracks trend louder/more intense).
+    # Duration has a weak negative correlation with energy (long songs tend calmer).
     energy = clamp(
-        0.45 * stable_fraction("energy", *signature) +
-        0.25 * popularity_norm +
-        0.15 * track_slot_norm +
-        0.15 * (0.90 if explicit else 0.35)
+        0.40 * popularity_norm +
+        0.30 * (1 - duration_norm) +
+        0.20 * stable_fraction("energy", *signature) +
+        0.10 * (0.90 if explicit else 0.35)
     )
+    # Valence: explicit songs strongly trend negative; year has negligible basis
+    # so we drop it. The remainder is a stable fingerprint from the track identity.
     valence = clamp(
-        0.45 * stable_fraction("valence", *signature) +
-        0.30 * year_norm +
-        0.25 * (0.15 if explicit else 0.85)
+        0.55 * stable_fraction("valence", *signature) +
+        0.45 * (0.15 if explicit else 0.85)
     )
+    # Tempo: longer duration correlates with slower tempo (ballads, ambient).
+    # So we invert duration_norm: short songs → faster, long songs → slower.
     tempo = round(
         80 + 95 * (
-            0.55 * duration_norm +
+            0.55 * (1 - duration_norm) +
             0.45 * stable_fraction("tempo", *signature)
         ),
         2,
     )
+    # Key: not deducible from metadata — derived entirely from the track's
+    # identity hash so it is unique and deterministic per track.
     key = min(11, int(stable_fraction("key", *signature) * 12))
-    mode = 1 if (
-        0.55 * stable_fraction("mode", *signature) +
-        0.25 * year_norm +
-        0.20 * (0.0 if explicit else 1.0)
-    ) >= 0.5 else 0
+    # Mode: not deducible from metadata — same rationale as key.
+    mode = 1 if stable_fraction("mode", *signature) >= 0.5 else 0
+    # Acousticness: less popular tracks and shorter tracks lean more acoustic.
     acousticness = clamp(
-        0.50 * stable_fraction("acousticness", *signature) +
-        0.30 * (1 - popularity_norm) +
-        0.20 * (1 - energy)
+        0.50 * (1 - popularity_norm) +
+        0.30 * duration_norm +
+        0.20 * stable_fraction("acousticness", *signature)
     )
+    # Danceability: popularity is the strongest available proxy.
+    # Explicit flag adds a small positive signal (explicit pop/hip-hop skews danceable).
     danceability = clamp(
-        0.45 * stable_fraction("danceability", *signature) +
-        0.35 * track_slot_norm +
-        0.20 * popularity_norm
+        0.55 * popularity_norm +
+        0.25 * stable_fraction("danceability", *signature) +
+        0.20 * (0.80 if explicit else 0.40)
     )
     loudness = round(
         -32 + 28 * energy + 6 * (stable_fraction("loudness", *signature) - 0.5),
@@ -190,8 +183,11 @@ def features_to_seed(features: dict, track_id: str) -> int:
     Convert Spotify audio features into a deterministic Minecraft seed.
 
     Minecraft seeds are 64-bit signed integers (-2^63 to 2^63-1).
-    We spread the features across different magnitude "slots" so each
-    one independently contributes to the final number.
+    Every feature is normalised to [0, 1], then all values are hashed
+    together so that each dimension (energy, valence, tempo, key, mode,
+    acousticness, danceability, loudness) contributes equally to the seed.
+    The track ID is included to guarantee uniqueness between tracks that
+    happen to share near-identical rounded feature values.
     """
     energy       = features.get("energy",       0.5)   # 0.0 – 1.0
     valence      = features.get("valence",       0.5)   # 0.0 – 1.0  (positivity)
@@ -202,24 +198,29 @@ def features_to_seed(features: dict, track_id: str) -> int:
     danceability = features.get("danceability",  0.5)   # 0.0 – 1.0
     loudness     = features.get("loudness",     -10)    # dB, typically -60 to 0
 
-    # Normalise loudness to 0–1
-    loudness_norm = max(0.0, min(1.0, (loudness + 60) / 60))
+    # Normalise every feature to [0, 1] using its known real-world range.
+    # Round to 4 d.p. so insignificant floating-point noise doesn't alter
+    # the seed (Spotify reports features to at most 3 d.p. anyway).
+    tempo_norm    = round(max(0.0, min(1.0, (tempo - 50) / 200)), 4)
+    loudness_norm = round(max(0.0, min(1.0, (loudness + 60) / 60)), 4)
+    key_norm      = round(key / 11.0, 4)
 
-    seed = int(
-        energy       * 1_000_000_000_000 +
-        valence      * 100_000_000_000  +
-        (tempo / 250)* 10_000_000_000   +
-        key          * 1_000_000_000    +
-        mode         * 100_000_000      +
-        acousticness * 10_000_000       +
-        danceability * 1_000_000        +
-        loudness_norm* 100_000
-    )
-
-    # Mix in a hash of the track ID for uniqueness between similar-sounding songs
-    track_hash = stable_track_hash(track_id)
-    seed = (seed + track_hash) % (2**63)
-
+    # Hash all normalised features + the track ID into a 63-bit seed.
+    # Every feature participates equally in the SHA-256 input, so a change
+    # in any single dimension changes the seed unpredictably but repeatably.
+    feature_str = "|".join([
+        f"{round(energy, 4)}",
+        f"{round(valence, 4)}",
+        f"{tempo_norm}",
+        f"{key_norm}",
+        f"{mode}",
+        f"{round(acousticness, 4)}",
+        f"{round(danceability, 4)}",
+        f"{loudness_norm}",
+        track_id,
+    ])
+    digest = hashlib.sha256(feature_str.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], "big") % (2**63)
     return seed
 
 
