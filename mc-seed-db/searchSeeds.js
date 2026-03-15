@@ -7,7 +7,7 @@ async function main() {
 
   const results = await collection.find({
     villageCloseBy: true,
-    cherryGroveCloseBy: true
+    ruinedPortalCloseBy: true
   }).toArray();
 
   console.log(results);
