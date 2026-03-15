@@ -36,6 +36,12 @@ SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_AUDIO_FEATURES_MODE = os.getenv("SPOTIFY_AUDIO_FEATURES_MODE", "off").strip().lower()
 
+# --- Last.fm credentials ---
+# Used for crowd-sourced genre tags (track.getTopTags / artist.getTopTags).
+# Free API key from https://www.last.fm/api/account/create
+LASTFM_API_KEY = os.getenv("LASTFM_API_KEY", "").strip()
+LASTFM_BASE    = "https://ws.audioscrobbler.com/2.0/"
+
 if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
     raise RuntimeError(
         "Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in environment or soundscape/seed-generator/.env"
@@ -461,6 +467,208 @@ def fetch_deezer_preview(track: dict) -> str | None:
         return None
 
 
+# ──── Last.fm Tag-Based Genre Classification ──────────────────────────
+#
+# Maps crowd-sourced Last.fm tags to our 10 internal genre keys.
+# Each tag keyword maps to (genre_key, weight).  When multiple tags match,
+# their weights are summed per genre and the highest total wins.
+
+_LASTFM_TAG_MAP: dict[str, tuple[str, float]] = {
+    # Metal / Heavy Rock
+    "metal":            ("metal",      1.0),
+    "heavy metal":      ("metal",      1.0),
+    "thrash metal":     ("metal",      1.0),
+    "death metal":      ("metal",      1.0),
+    "black metal":      ("metal",      1.0),
+    "doom metal":       ("metal",      0.9),
+    "metalcore":        ("metal",      0.9),
+    "nu metal":         ("metal",      0.9),
+    "progressive metal":("metal",      0.8),
+    "hard rock":        ("metal",      0.6),
+    "hardcore":         ("metal",      0.7),
+    "grindcore":        ("metal",      0.8),
+    # Rock / Alternative
+    "rock":             ("rock",       1.0),
+    "alternative":      ("rock",       0.9),
+    "alternative rock": ("rock",       1.0),
+    "indie rock":       ("rock",       0.9),
+    "punk":             ("rock",       0.8),
+    "punk rock":        ("rock",       0.9),
+    "post-punk":        ("rock",       0.8),
+    "grunge":           ("rock",       0.9),
+    "garage rock":      ("rock",       0.8),
+    "classic rock":     ("rock",       1.0),
+    "psychedelic rock": ("rock",       0.8),
+    "britpop":          ("rock",       0.7),
+    "shoegaze":         ("rock",       0.7),
+    # Pop / Dance-Pop
+    "pop":              ("pop",        1.0),
+    "dance-pop":        ("pop",        1.0),
+    "electropop":       ("pop",        0.9),
+    "synthpop":         ("pop",        0.8),
+    "synth-pop":        ("pop",        0.8),
+    "k-pop":            ("pop",        0.9),
+    "j-pop":            ("pop",        0.9),
+    "teen pop":         ("pop",        0.9),
+    "power pop":        ("pop",        0.8),
+    "bubblegum pop":    ("pop",        0.9),
+    # Hip-Hop / R&B
+    "hip-hop":          ("hiphop",     1.0),
+    "hip hop":          ("hiphop",     1.0),
+    "rap":              ("hiphop",     1.0),
+    "trap":             ("hiphop",     0.9),
+    "rnb":              ("hiphop",     0.9),
+    "r&b":              ("hiphop",     0.9),
+    "r'n'b":            ("hiphop",     0.9),
+    "soul":             ("hiphop",     0.7),
+    "neo-soul":         ("hiphop",     0.8),
+    "grime":            ("hiphop",     0.8),
+    "drill":            ("hiphop",     0.9),
+    "boom bap":         ("hiphop",     0.9),
+    # Electronic / Synth
+    "electronic":       ("electronic", 1.0),
+    "edm":              ("electronic", 1.0),
+    "house":            ("electronic", 0.9),
+    "techno":           ("electronic", 0.9),
+    "trance":           ("electronic", 0.9),
+    "drum and bass":    ("electronic", 0.9),
+    "dnb":              ("electronic", 0.9),
+    "dubstep":          ("electronic", 0.9),
+    "electronica":      ("electronic", 0.8),
+    "dance":            ("electronic", 0.7),
+    "synthwave":        ("electronic", 0.8),
+    "idm":              ("electronic", 0.8),
+    "disco":            ("electronic", 0.6),
+    # Jazz / Swing
+    "jazz":             ("jazz",       1.0),
+    "swing":            ("jazz",       0.9),
+    "bebop":            ("jazz",       1.0),
+    "smooth jazz":      ("jazz",       0.9),
+    "fusion":           ("jazz",       0.8),
+    "bossa nova":       ("jazz",       0.8),
+    "big band":         ("jazz",       0.9),
+    "latin jazz":       ("jazz",       0.9),
+    "free jazz":        ("jazz",       0.9),
+    # Classical / Orchestral
+    "classical":        ("classical",  1.0),
+    "orchestra":        ("classical",  0.9),
+    "orchestral":       ("classical",  0.9),
+    "symphony":         ("classical",  1.0),
+    "opera":            ("classical",  0.9),
+    "chamber music":    ("classical",  0.9),
+    "baroque":          ("classical",  0.9),
+    "romantic":         ("classical",  0.7),
+    "piano":            ("classical",  0.5),
+    # Country / Folk
+    "country":          ("country",    1.0),
+    "folk":             ("country",    0.9),
+    "bluegrass":        ("country",    0.9),
+    "americana":        ("country",    0.9),
+    "indie folk":       ("country",    0.7),
+    "singer-songwriter":("country",    0.5),
+    "celtic":           ("country",    0.7),
+    # Indie Pop / Soft Acoustic
+    "indie":            ("indipop",    0.8),
+    "indie pop":        ("indipop",    1.0),
+    "dream pop":        ("indipop",    0.9),
+    "chamber pop":      ("indipop",    0.8),
+    "lo-fi":            ("indipop",    0.7),
+    "chillwave":        ("indipop",    0.8),
+    # Ambient / Atmospheric
+    "ambient":          ("ambient",    1.0),
+    "downtempo":        ("ambient",    0.9),
+    "chillout":         ("ambient",    0.9),
+    "trip-hop":         ("ambient",    0.7),
+    "new age":          ("ambient",    0.8),
+    "drone":            ("ambient",    0.9),
+    "post-rock":        ("ambient",    0.6),
+    "atmospheric":      ("ambient",    0.8),
+}
+
+
+def fetch_lastfm_tags(track: dict) -> list[dict] | None:
+    """
+    Fetch genre tags from Last.fm for the given Spotify track.
+
+    Tries track.getTopTags first (most specific), then falls back to
+    artist.getTopTags if the track has no tags.  Returns a list of
+    {name, count} dicts sorted by descending count, or None on failure.
+    """
+    if not LASTFM_API_KEY:
+        return None
+
+    track_name  = track.get("name", "")
+    artists     = track.get("artists") or []
+    artist_name = artists[0].get("name", "") if artists else ""
+
+    if not track_name or not artist_name:
+        return None
+
+    def _query(method: str, extra_params: dict) -> list[dict] | None:
+        params = {
+            "method":  method,
+            "api_key": LASTFM_API_KEY,
+            "format":  "json",
+            **extra_params,
+        }
+        try:
+            resp = http_requests.get(LASTFM_BASE, params=params, timeout=8)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            tags = data.get("toptags", {}).get("tag", [])
+            # Filter out non-dict entries and tags with count 0
+            return [
+                {"name": t["name"].lower().strip(), "count": int(t.get("count", 0))}
+                for t in tags
+                if isinstance(t, dict) and t.get("name")
+            ] or None
+        except Exception:
+            return None
+
+    # Try track-level tags first (most specific)
+    tags = _query("track.getTopTags", {"artist": artist_name, "track": track_name})
+
+    # Filter to tags with meaningful confidence (count >= 5)
+    if tags:
+        tags = [t for t in tags if t["count"] >= 5]
+
+    if not tags:
+        # Fallback: artist-level tags (broader but always available)
+        tags = _query("artist.getTopTags", {"artist": artist_name})
+        if tags:
+            tags = [t for t in tags if t["count"] >= 5]
+
+    return tags if tags else None
+
+
+def lastfm_tags_to_genre(tags: list[dict] | None) -> str | None:
+    """
+    Convert Last.fm tags into one of our 10 internal genre keys.
+
+    Each matching tag contributes  (tag_count / 100) * mapping_weight
+    to its genre bucket.  The genre with the highest total score wins.
+    Returns None if no tags matched any known genre.
+    """
+    if not tags:
+        return None
+
+    scores: dict[str, float] = {}
+
+    for tag in tags:
+        name   = tag["name"]
+        count  = tag["count"]
+        mapped = _LASTFM_TAG_MAP.get(name)
+        if mapped:
+            genre, weight = mapped
+            scores[genre] = scores.get(genre, 0.0) + (count / 100.0) * weight
+
+    if not scores:
+        return None
+
+    return max(scores, key=scores.get)  # type: ignore[arg-type]
+
+
 def metadata_to_features(track: dict, track_id: str) -> dict:
     """
     Build a deterministic fallback feature set from track metadata.
@@ -573,7 +781,7 @@ def fetch_track_features(track_id: str, track: dict) -> tuple[dict, str | None]:
     Get audio features using the best available source:
       1. Spotify Audio Features API when explicitly enabled
       2. Librosa analysis of the Spotify 30-second preview (real audio analysis)
-      3. Librosa analysis of a Deezer 30-second preview (real audio analysis)
+      3. Deezer fuzzy text search → Deezer preview + librosa
       4. Metadata-based fallback (deterministic but estimated)
     """
     global spotify_audio_features_blocked
@@ -815,7 +1023,8 @@ _GENRE_PROFILES = [
 ]
 
 
-def build_world_profile(features: dict) -> dict:
+def build_world_profile(features: dict,
+                        lastfm_genre: str | None = None) -> dict:
     """
     Describe the kind of Minecraft world this song will generate,
     based on its audio fingerprint.
@@ -823,6 +1032,10 @@ def build_world_profile(features: dict) -> dict:
     Every decision (biome, terrain, atmosphere, genre) is scored against
     ALL audio features using weighted target profiles, so different
     feature combinations always produce distinct results.
+
+    If *lastfm_genre* is provided (from Last.fm crowd-sourced tags) it
+    overrides the audio-feature-based genre scoring, since real-world
+    genre data is far more reliable than heuristic classification.
     """
     energy       = features.get("energy",       0.5)
     valence      = features.get("valence",       0.5)
@@ -841,7 +1054,12 @@ def build_world_profile(features: dict) -> dict:
     biome      = _best_match(fv, _BIOME_PROFILES)
     terrain    = _best_match(fv, _TERRAIN_PROFILES)
     atmosphere = _best_match(fv, _ATMOSPHERE_PROFILES)
-    genre      = _best_match(fv, _GENRE_PROFILES)
+
+    # Genre: prefer Last.fm crowd-sourced tags, fall back to feature scoring
+    if lastfm_genre:
+        genre_key = lastfm_genre
+    else:
+        genre_key = _best_match(fv, _GENRE_PROFILES)["key"]
 
     # --- Hostility (weighted formula across all features) ---
     hostility_score = (
@@ -863,7 +1081,8 @@ def build_world_profile(features: dict) -> dict:
         "dominant_biome": biome["label"],
         "atmosphere":     atmosphere["label"],
         "hostility":      hostility,
-        "mod_genre":      genre["key"],
+        "mod_genre":      genre_key,
+        "genre_source":   "lastfm" if lastfm_genre else "audio-analysis",
         "stats": {
             "energy":       round(energy * 100),
             "positivity":   round(valence * 100),
@@ -907,8 +1126,13 @@ def generate():
 
         features, analysis_note = fetch_track_features(track_id, track)
 
+        # Fetch genre tags from Last.fm (runs in parallel with nothing,
+        # but kept separate so a Last.fm failure never blocks seed generation).
+        lastfm_tags  = fetch_lastfm_tags(track)
+        lastfm_genre = lastfm_tags_to_genre(lastfm_tags)
+
         seed    = features_to_seed(features, track_id)
-        profile = build_world_profile(features)
+        profile = build_world_profile(features, lastfm_genre=lastfm_genre)
 
         # Safely extract metadata with fallbacks.
         track_name = track.get("name", "Unknown Track")
@@ -927,7 +1151,10 @@ def generate():
             "analysis_note": analysis_note,
             "analysis_source": (
                 "audio-features" if not analysis_note else
-                "audio-preview" if analysis_note in (SPOTIFY_AUDIO_FEATURES_NOTE, DEEZER_AUDIO_PREVIEW_NOTE) else
+                "audio-preview" if analysis_note in (
+                    SPOTIFY_AUDIO_FEATURES_NOTE,
+                    DEEZER_AUDIO_PREVIEW_NOTE,
+                ) else
                 "metadata-fallback"
             ),
         })

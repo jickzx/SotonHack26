@@ -326,6 +326,14 @@
       margin-top: 12px;
     }
 
+    .genre-source {
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-top: 4px;
+      font-style: italic;
+      letter-spacing: 0.02em;
+    }
+
     .mod-note {
       background: rgba(106,255,180,0.07);
       border: 1px solid rgba(106,255,180,0.2);
@@ -429,6 +437,7 @@
         </div>
         <div>
           <div class="genre-badge" id="genreBadge"></div>
+          <div class="genre-source" id="genreSource"></div>
         </div>
       </div>
 
@@ -501,6 +510,15 @@
       const genreLabel = GENRE_LABELS[p.mod_genre] || p.mod_genre;
       document.getElementById("genreBadge").textContent = "In-world genre: " + genreLabel;
       document.getElementById("genreNote").textContent  = genreLabel + " music";
+
+      const genreSourceEl = document.getElementById("genreSource");
+      if (p.genre_source === "lastfm") {
+        genreSourceEl.textContent = "genre via Last.fm community tags";
+      } else if (p.genre_source === "audio-analysis") {
+        genreSourceEl.textContent = "genre estimated from audio features";
+      } else {
+        genreSourceEl.textContent = "";
+      }
 
       // Stats
       const stats = p.stats || {};
