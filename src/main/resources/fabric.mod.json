@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "musicworld",
+  "version": "${version}",
+  "name": "MusicWorld",
+  "description": "Procedural world generation driven by music genre profiles.",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.musicworld.MusicWorldMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "fabric-api": "*",
+    "minecraft": "~1.20.1"
+  }
+}

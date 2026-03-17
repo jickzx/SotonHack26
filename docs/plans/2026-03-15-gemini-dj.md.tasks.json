@@ -1,0 +1,9 @@
+{
+  "planPath": "docs/plans/2026-03-15-gemini-dj.md",
+  "tasks": [
+    {"id": 0, "subject": "Task 0: Create gemini_dj.py with get_dj_intro", "status": "pending"},
+    {"id": 1, "subject": "Task 1: Wire gemini_dj into musecraft.py", "status": "pending", "blockedBy": [0]},
+    {"id": 2, "subject": "Task 2: Update README and push", "status": "pending", "blockedBy": [1]}
+  ],
+  "lastUpdated": "2026-03-15T00:00:00Z"
+}

@@ -1,4 +1,37 @@
-soundscape/seed-generator/.env
+# Gradle
+.gradle/
+build/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Fabric Loom cache
+.loom/
+remappedSources/
+
+# Mod build outputs (keep datapack)
+build/
+
+# Secrets
 .env
-../.venv
-node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

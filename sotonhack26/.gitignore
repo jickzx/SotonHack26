@@ -1,0 +1,5 @@
+soundscape/seed-generator/.env
+.env
+../.venv
+node_modules/
+.vercel

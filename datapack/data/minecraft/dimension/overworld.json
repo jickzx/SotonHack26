@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:overworld",
+  "generator": {
+    "type": "musicworld:music_generator",
+    "biome_source": {
+      "type": "musicworld:music_biome_source",
+      "biomes": [
+        "minecraft:plains",
+        "minecraft:savanna",
+        "minecraft:dark_forest",
+        "minecraft:swamp",
+        "minecraft:deep_dark"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "mc-seed-db/seeds.json"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/soundscape/seed-generator/templates/index.html"
+    }
+  ]
+}

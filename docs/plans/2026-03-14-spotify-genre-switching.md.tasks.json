@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/plans/2026-03-14-spotify-genre-switching.md",
+  "tasks": [
+    {"id": 0, "subject": "Task 0: Create scripts directory and test scaffold", "status": "pending"},
+    {"id": 1, "subject": "Task 1: spotify_reader — read current track via osascript", "status": "pending", "blockedBy": [0]},
+    {"id": 2, "subject": "Task 2: genre_detector — Last.fm tag lookup + keyword matching", "status": "pending", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: rcon_sender — send /genworld via RCON", "status": "pending", "blockedBy": [2]},
+    {"id": 4, "subject": "Task 4: poll_loop — main loop wiring everything together", "status": "pending", "blockedBy": [3]},
+    {"id": 5, "subject": "Task 5: README for the script", "status": "pending", "blockedBy": [4]}
+  ],
+  "lastUpdated": "2026-03-14T00:00:00Z"
+}

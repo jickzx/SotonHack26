@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Soundscape - Genre to Minecraft Seed</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+    :root {
+      --bg: #f4efe3;
+      --bg-accent: #e4d7bb;
+      --surface: rgba(255, 251, 242, 0.86);
+      --surface-strong: #fffaf0;
+      --border: rgba(88, 70, 44, 0.14);
+      --text: #2f2417;
+      --muted: #6e5f4b;
+      --accent: #b86a2d;
+      --accent-dark: #86491c;
+      --accent-soft: rgba(184, 106, 45, 0.14);
+      --success: #2f7c57;
+      --error: #b24438;
+      --shadow: 0 24px 80px rgba(111, 87, 52, 0.14);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      padding: 32px 18px 60px;
+      font-family: 'Outfit', sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(90, 143, 103, 0.22), transparent 30%),
+        radial-gradient(circle at top right, rgba(184, 106, 45, 0.22), transparent 28%),
+        linear-gradient(180deg, var(--bg) 0%, #efe5d0 100%);
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: auto;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.45;
+    }
+
+    body::before {
+      width: 320px;
+      height: 320px;
+      bottom: -90px;
+      left: -70px;
+      border-radius: 42% 58% 68% 32% / 36% 42% 58% 64%;
+      background: rgba(90, 143, 103, 0.16);
+    }
+
+    body::after {
+      width: 260px;
+      height: 260px;
+      top: 80px;
+      right: -60px;
+      border-radius: 54% 46% 34% 66% / 44% 38% 62% 56%;
+      background: rgba(184, 106, 45, 0.12);
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      gap: 24px;
+    }
+
+    .hero,
+    .panel {
+      backdrop-filter: blur(14px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 34px 28px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -60px -60px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(184, 106, 45, 0.18), transparent 68%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(47, 124, 87, 0.1);
+      color: var(--success);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      font-size: clamp(2.3rem, 5vw, 4.3rem);
+      line-height: 0.96;
+      max-width: 640px;
+      margin-bottom: 16px;
+    }
+
+    .hero p {
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 1.04rem;
+      line-height: 1.7;
+    }
+
+    .panel {
+      padding: 28px;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-end;
+      margin-bottom: 20px;
+    }
+
+    .panel-head h2 {
+      font-size: 1.55rem;
+      margin-bottom: 6px;
+    }
+
+    .panel-head p {
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 560px;
+    }
+
+    .api-badge {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+      font-size: 0.86rem;
+      color: var(--muted);
+    }
+
+    .genre-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .genre-card {
+      width: 100%;
+      text-align: left;
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid var(--border);
+      background: rgba(255, 250, 240, 0.9);
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      cursor: pointer;
+    }
+
+    .genre-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(184, 106, 45, 0.34);
+      box-shadow: 0 16px 34px rgba(111, 87, 52, 0.1);
+    }
+
+    .genre-card.active {
+      border-color: rgba(184, 106, 45, 0.55);
+      background: linear-gradient(180deg, #fff8ee 0%, #f9efe2 100%);
+      box-shadow: 0 18px 38px rgba(184, 106, 45, 0.16);
+    }
+
+    .genre-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .genre-title strong {
+      font-size: 1.02rem;
+    }
+
+    .genre-pulse {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(47, 124, 87, 0.35);
+    }
+
+    .genre-card.active .genre-pulse {
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(184, 106, 45, 0.12);
+    }
+
+    .genre-description {
+      color: var(--muted);
+      line-height: 1.55;
+      margin-bottom: 14px;
+      min-height: 50px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(184, 106, 45, 0.09);
+      color: var(--accent-dark);
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .prompt-shell {
+      margin-top: 20px;
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid var(--border);
+      background: rgba(255, 250, 240, 0.82);
+    }
+
+    .prompt-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .prompt-label {
+      font-size: 0.94rem;
+      font-weight: 700;
+    }
+
+    .prompt-meta,
+    .prompt-note {
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    .prompt-input {
+      width: 100%;
+      min-height: 104px;
+      resize: vertical;
+      padding: 14px 15px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.66);
+      color: var(--text);
+      font: inherit;
+      line-height: 1.6;
+      outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      margin-bottom: 10px;
+    }
+
+    .prompt-input:focus {
+      border-color: rgba(184, 106, 45, 0.45);
+      box-shadow: 0 0 0 4px rgba(184, 106, 45, 0.08);
+    }
+
+    .actions {
+      margin-top: 22px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .primary-btn,
+    .copy-btn {
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      transition: transform 0.14s ease, opacity 0.14s ease, box-shadow 0.14s ease;
+    }
+
+    .primary-btn {
+      padding: 14px 20px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--accent) 0%, #cf8b45 100%);
+      color: #fffdf8;
+      font-size: 0.98rem;
+      font-weight: 700;
+      box-shadow: 0 14px 28px rgba(184, 106, 45, 0.2);
+    }
+
+    .primary-btn:hover,
+    .copy-btn:hover {
+      transform: translateY(-1px);
+      opacity: 0.96;
+    }
+
+    .primary-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .helper {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .loading,
+    .error-box,
+    .note-box,
+    #result {
+      display: none;
+    }
+
+    .loading,
+    .error-box,
+    .note-box {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      line-height: 1.55;
+    }
+
+    .loading {
+      background: rgba(47, 124, 87, 0.08);
+      color: var(--success);
+    }
+
+    .error-box {
+      background: rgba(178, 68, 56, 0.08);
+      color: var(--error);
+      border-color: rgba(178, 68, 56, 0.18);
+    }
+
+    .note-box {
+      background: rgba(184, 106, 45, 0.08);
+      color: var(--accent-dark);
+      border-color: rgba(184, 106, 45, 0.18);
+    }
+
+    #result {
+      margin-top: 24px;
+    }
+
+    .result-shell {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+    }
+
+    .result-card,
+    .seed-card {
+      background: rgba(255, 250, 240, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 22px;
+    }
+
+    .result-card h3 {
+      font-size: 1.5rem;
+      margin-bottom: 8px;
+    }
+
+    .result-card p {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .seed-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+      background: linear-gradient(180deg, #fff6e8 0%, #fffaf1 100%);
+    }
+
+    .seed-label {
+      color: var(--accent-dark);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .seed-number {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: clamp(1.32rem, 2vw, 1.72rem);
+      line-height: 1.3;
+      word-break: break-word;
+      color: var(--success);
+    }
+
+    .copy-btn {
+      align-self: flex-start;
+      padding: 11px 14px;
+      border-radius: 14px;
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+      font-weight: 600;
+    }
+
+    .detail-grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .detail-card {
+      background: rgba(255, 250, 240, 0.9);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 18px;
+    }
+
+    .detail-card h4 {
+      font-size: 0.78rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .detail-card strong {
+      display: block;
+      font-size: 1.05rem;
+      margin-bottom: 6px;
+    }
+
+    .detail-card p {
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 0.95rem;
+    }
+
+    .footnote {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 760px) {
+      .genre-grid,
+      .result-shell,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel-head {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .panel,
+      .hero {
+        padding: 22px;
+      }
+    }
+  </style>
+</head>
+<body data-api-base-url="{{ api_base_url }}">
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">Soundscape x mc-seed-db</div>
+      <h1>Pick a genre.<br />Get a world.</h1>
+      <p>
+        Choose the kind of music you want to live inside. Soundscape handles the frontend,
+        and <code>mc-seed-db</code> returns a Minecraft seed whose nearby biomes fit that vibe.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Choose your listening lane</h2>
+          <p>Each option maps to a biome profile already indexed in the seed database.</p>
+        </div>
+        <div class="api-badge">Live data from <code>mc-seed-db</code></div>
+      </div>
+
+      <div class="genre-grid" id="genreGrid"></div>
+
+      <div class="prompt-shell">
+        <div class="prompt-head">
+          <label class="prompt-label" for="seedPrompt">Optional prompt</label>
+          <div class="prompt-meta">Use plain English</div>
+        </div>
+        <textarea id="seedPrompt" class="prompt-input" placeholder="Try: ambient with a ruined portal nearby, or metal with a mansion but no ocean"></textarea>
+        <p class="prompt-note">Add nearby structures or biomes here. If you name a genre in the prompt, it overrides the selected card.</p>
+      </div>
+
+      <div class="actions">
+        <button class="primary-btn" id="generateBtn" disabled onclick="generateSeed()">Find me a seed</button>
+        <div class="helper" id="helperText">Loading genres from the local backend...</div>
+      </div>
+
+      <div class="loading" id="loading">Finding a high-match seed from mc-seed-db...</div>
+      <div class="error-box" id="errorBox"></div>
+      <div class="note-box" id="noteBox"></div>
+
+      <div id="result">
+        <div class="result-shell">
+          <div class="result-card">
+            <div class="eyebrow" id="resultGenreBadge">Genre match</div>
+            <h3 id="resultGenreTitle"></h3>
+            <p id="resultGenreDescription"></p>
+          </div>
+
+          <div class="seed-card">
+            <div>
+              <div class="seed-label">Recommended Minecraft Seed</div>
+              <div class="seed-number" id="seedNumber"></div>
+            </div>
+            <button class="copy-btn" id="copyBtn" onclick="copySeed()">Copy seed</button>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="detail-card">
+            <h4>Spawn Biome</h4>
+            <strong id="spawnBiome"></strong>
+            <p>The recorded spawn biome for this seed in the indexed dataset.</p>
+          </div>
+
+          <div class="detail-card">
+            <h4>Nearby Match Biomes</h4>
+            <div class="tag-row" id="matchedBiomes"></div>
+          </div>
+
+          <div class="detail-card">
+            <h4>Nearby Structures</h4>
+            <div class="tag-row" id="matchedStructures"></div>
+          </div>
+
+          <div class="detail-card">
+            <h4>Prompt Match</h4>
+            <strong id="promptMode">Genre-only search</strong>
+            <p id="promptSummary">Add a prompt to require nearby structures or biomes.</p>
+          </div>
+
+          <div class="detail-card">
+            <h4>Match Pool</h4>
+            <strong id="matchPool"></strong>
+            <p id="matchScore"></p>
+          </div>
+        </div>
+
+        <div class="footnote" id="resultFootnote"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const rawApiBaseUrl = document.body.dataset.apiBaseUrl || "";
+    const API_BASE_URL = rawApiBaseUrl.includes("{{")
+      ? ""
+      : rawApiBaseUrl.replace(/\/$/, "");
+    let genres = [];
+    let selectedGenreKey = null;
+
+    function setHelperText(message) {
+      document.getElementById("helperText").textContent = message;
+    }
+
+    function setLoading(isLoading) {
+      document.getElementById("loading").style.display = isLoading ? "block" : "none";
+      document.getElementById("generateBtn").disabled = isLoading || !selectedGenreKey;
+    }
+
+    function showError(message) {
+      const box = document.getElementById("errorBox");
+      box.textContent = message;
+      box.style.display = "block";
+    }
+
+    function hideError() {
+      document.getElementById("errorBox").style.display = "none";
+      document.getElementById("errorBox").textContent = "";
+    }
+
+    function setNote(message) {
+      const box = document.getElementById("noteBox");
+      if (!message) {
+        box.style.display = "none";
+        box.textContent = "";
+        return;
+      }
+
+      box.textContent = message;
+      box.style.display = "block";
+    }
+
+    function renderTags(containerId, items, emptyLabel) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+
+      const values = Array.isArray(items) && items.length ? items : [emptyLabel];
+      values.forEach(value => {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = value;
+        container.appendChild(tag);
+      });
+    }
+
+    function getPromptValue() {
+      return document.getElementById("seedPrompt").value.trim();
+    }
+
+    function renderGenres() {
+      const grid = document.getElementById("genreGrid");
+      grid.innerHTML = "";
+
+      genres.forEach(genre => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "genre-card" + (genre.key === selectedGenreKey ? " active" : "");
+        button.onclick = () => selectGenre(genre.key);
+
+        const previewBiomes = (genre.biomes || []).slice(0, 3);
+        button.innerHTML = `
+          <div class="genre-title">
+            <strong>${genre.label}</strong>
+            <span class="genre-pulse"></span>
+          </div>
+          <div class="genre-description">${genre.description}</div>
+          <div class="tag-row">
+            ${previewBiomes.map(biome => `<span class="tag">${biome}</span>`).join("")}
+          </div>
+        `;
+
+        grid.appendChild(button);
+      });
+    }
+
+    function selectGenre(key) {
+      selectedGenreKey = key;
+      renderGenres();
+      document.getElementById("generateBtn").disabled = false;
+
+      const selected = genres.find(genre => genre.key === key);
+      if (selected) {
+        setHelperText(`Selected ${selected.label}. Add an optional prompt like "with a ruined portal nearby" to narrow the seed.`);
+        setNote(selected.note || "");
+      }
+    }
+
+    async function loadGenres() {
+      hideError();
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/genres`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Could not load genres from mc-seed-db.");
+        }
+
+        genres = data.genres || [];
+        if (!genres.length) {
+          throw new Error("mc-seed-db returned no genres.");
+        }
+
+        selectedGenreKey = genres[0].key;
+        renderGenres();
+        selectGenre(selectedGenreKey);
+      } catch (error) {
+        showError(error.message || "Could not connect to the local seed API.");
+        setHelperText("Start the backend, then refresh this page.");
+      }
+    }
+
+    async function generateSeed() {
+      if (!selectedGenreKey) {
+        return;
+      }
+
+      hideError();
+      setLoading(true);
+      document.getElementById("result").style.display = "none";
+
+      try {
+        const params = new URLSearchParams({ genre: selectedGenreKey });
+        const prompt = getPromptValue();
+        if (prompt) {
+          params.set("prompt", prompt);
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/recommend-seed?${params.toString()}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Could not generate a seed.");
+        }
+
+        renderResult(data);
+      } catch (error) {
+        showError(error.message || "Could not fetch a seed from mc-seed-db.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderResult(data) {
+      const hasPromptFilters = Boolean(
+        (data.prompt?.required || []).length ||
+        (data.prompt?.excluded || []).length ||
+        data.prompt?.requestedSpawnBiome
+      );
+      const promptSourceLabel = data.prompt?.source === "gemini" ? " (via Gemini)" : "";
+      document.getElementById("resultGenreBadge").textContent = hasPromptFilters
+        ? `${data.genre.label} prompt match${promptSourceLabel}`
+        : `${data.genre.label} match`;
+      document.getElementById("resultGenreTitle").textContent = data.genre.label;
+      document.getElementById("resultGenreDescription").textContent = data.genre.description;
+      document.getElementById("seedNumber").textContent = data.seed;
+      document.getElementById("spawnBiome").textContent = data.spawnBiome || "Unknown";
+
+      if (hasPromptFilters) {
+        document.getElementById("matchPool").textContent = data.matchMode === "exact"
+          ? `${data.exactPromptMatchCount} exact prompt matches`
+          : `${data.exactPromptMatchCount} exact matches, ${data.totalMatchingSeeds} close candidates`;
+        document.getElementById("matchScore").textContent = data.matchMode === "exact"
+          ? `Picked from the strongest exact matches. Score: ${data.matchScore}.`
+          : `No exact seed hit every prompt filter, so this came from the closest matching pool. Score: ${data.matchScore}.`;
+      } else {
+        document.getElementById("matchPool").textContent = `${data.totalMatchingSeeds} candidate seeds`;
+        document.getElementById("matchScore").textContent = `Picked from the strongest matches in the current pool. Score: ${data.matchScore}.`;
+      }
+
+      renderTags("matchedBiomes", data.matchedBiomes, "No matched biomes recorded");
+      renderTags("matchedStructures", data.matchedStructures, "No featured structures on this pick");
+
+      const promptSummary = [];
+      if (hasPromptFilters) {
+        promptSummary.push(data.matchMode === "exact"
+          ? "All parsed prompt filters matched this seed."
+          : data.matchMode === "closest"
+            ? "No exact seed matched every parsed filter; this is the closest result."
+            : "Fell back to genre-only pool with prompt scoring.");
+        if (data.prompt.requestedSpawnBiome) {
+          const gotRequestedSpawn = data.spawnBiome === data.prompt.requestedSpawnBiome;
+          promptSummary.push(gotRequestedSpawn
+            ? `Spawn biome: ${data.prompt.requestedSpawnBiome} (matched).`
+            : `Requested spawn: ${data.prompt.requestedSpawnBiome}; actual: ${data.spawnBiome}.`);
+        }
+        if ((data.prompt.required || []).length) {
+          promptSummary.push(`Wanted nearby: ${data.prompt.required.join(", ")}.`);
+        }
+        if ((data.prompt.excluded || []).length) {
+          promptSummary.push(`Avoided: ${data.prompt.excluded.join(", ")}.`);
+        }
+        if ((data.missingPromptFeatures || []).length) {
+          promptSummary.push(`Missing: ${data.missingPromptFeatures.join(", ")}.`);
+        }
+      } else {
+        promptSummary.push("Genre-only search. Add a prompt to require nearby structures or biomes.");
+      }
+
+      if (data.prompt.overridesSelectedGenre && data.prompt.inferredGenre) {
+        promptSummary.push(`Prompt genre override: ${data.prompt.inferredGenre}.`);
+      }
+      if (data.prompt.source) {
+        promptSummary.push(`Parsed by: ${data.prompt.source}.`);
+      }
+
+      document.getElementById("promptMode").textContent = hasPromptFilters
+        ? (data.matchMode === "exact" ? "Exact prompt match" : "Closest prompt match")
+        : "Genre-only search";
+      document.getElementById("promptSummary").textContent = promptSummary.join(" ");
+
+      const footnote = [];
+      footnote.push(`Served by ${data.source}.`);
+      if (data.genre.note) {
+        footnote.push(data.genre.note);
+      }
+      if (data.prompt.text) {
+        footnote.push(`Prompt: "${data.prompt.text}".`);
+      }
+      footnote.push("Run the button again to get another high-match seed for the same genre.");
+      document.getElementById("resultFootnote").textContent = footnote.join(" ");
+
+      setNote(data.genre.note || "");
+      document.getElementById("result").style.display = "block";
+    }
+
+    function copySeed() {
+      const seed = document.getElementById("seedNumber").textContent;
+      if (!seed) {
+        return;
+      }
+
+      navigator.clipboard.writeText(seed);
+      const button = document.getElementById("copyBtn");
+      button.textContent = "Copied";
+      setTimeout(() => {
+        button.textContent = "Copy seed";
+      }, 1600);
+    }
+
+    loadGenres();
+  </script>
+</body>
+</html>

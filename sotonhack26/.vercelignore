@@ -1,0 +1,5 @@
+node_modules
+.venv
+cubiomes
+soundscape/seed-generator/.env
+mc-seed-db/.env

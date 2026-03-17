@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/burgerking/.claude/skills"
+    ],
+    "allow": [
+      "WebFetch(domain:fabricmc.net)"
+    ]
+  }
+}

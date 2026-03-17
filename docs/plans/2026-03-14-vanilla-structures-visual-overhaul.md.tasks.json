@@ -1,0 +1,13 @@
+{
+  "planPath": "docs/plans/2026-03-14-vanilla-structures-visual-overhaul.md",
+  "tasks": [
+    {"id": 1, "subject": "Task 1: Create MusicBiomeSource + register in mod init", "status": "pending"},
+    {"id": 2, "subject": "Task 2: Wire MusicBiomeSource into overworld.json datapack", "status": "pending", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: Fix generateFeatures() to call super first", "status": "pending", "blockedBy": [2]},
+    {"id": 4, "subject": "Task 4: Underground features per genre", "status": "pending", "blockedBy": [3]},
+    {"id": 5, "subject": "Task 5: Surface decorations per genre", "status": "pending", "blockedBy": [3]},
+    {"id": 6, "subject": "Task 6: Randomise existing custom structures", "status": "pending", "blockedBy": [3]},
+    {"id": 7, "subject": "Task 7: Version bump + package deliverables", "status": "pending", "blockedBy": [4, 5, 6]}
+  ],
+  "lastUpdated": "2026-03-14T18:30:00Z"
+}
